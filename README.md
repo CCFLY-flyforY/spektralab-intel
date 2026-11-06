@@ -17,6 +17,17 @@ SpektraLab 的官方发行版只提供 **arm64** 的 DMG（`SpektraLab-1.3.5-arm
 | `DiagnosticBundle.swift` | 一个位运算表达式让 Swift 类型检查器超时 | 拆成多行 |
 | `Session.swift` / `MaskOverlay.swift` / `FilmEdgeSection.swift` / `Geometry.swift` | `CGFloat` ↔ `Double` 隐式转换在复杂表达式里造成重载歧义 | 显式转换、拆表达式 |
 
+## 直接下载（Intel 版，已改名换图标）
+
+不想自己编的，可以下我构建好的版本：
+
+- **FilmLab-1.0.0-x86_64.zip**（约 30MB）— 见本仓库 Releases
+- SHA-256：`695df366e53f0d20217517468d78811cc0a8bc2b0448b3df51cd5d6a75cd632f`
+
+它是 ad-hoc 签名（没有开发者账号、未公证），首次打开会被 Gatekeeper 拦一次：右键 → 打开，或 `xattr -dr com.apple.quarantine /Applications/FilmLab.app`。
+
+为什么叫 FilmLab：`SpektraLab™` 的名称与图标归上游作者的公司，对外分发必须换掉（见下文「关于名字与图标」）。功能与上游 1.3.5 相同。
+
 ## 怎么编
 
 前置：一台 Intel Mac、macOS 15+、**Command Line Tools**（`xcode-select --install`），以及**官方的 arm64 DMG**（只用来当资源骨架：`Assets.car`、`default.metallib`、胶片与相纸配置、DI LUT 都在里面，`actool` 与 `metal` 这两个只有 Xcode 才有的工具因此不用碰）。
