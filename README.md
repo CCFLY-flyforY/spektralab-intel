@@ -30,7 +30,9 @@ git apply /path/to/patches/intel-x86_64.patch
 hdiutil attach SpektraLab-1.3.5-arm64.dmg -nobrowse
 cp -R "/Volumes/SpektraLab 1.3.5/SpektraLab.app" /tmp/SpektraLab-x86.app
 
-./build-intel.sh --app /tmp/SpektraLab-x86.app --out ./build
+# 把本仓库的脚本拿过来，--src 指向刚才 checkout 的源码
+bash /path/to/spektralab-intel/build-intel.sh \
+     --src "$(pwd)" --app /tmp/SpektraLab-x86.app --out ./build
 ```
 
 脚本会：编 C++ 引擎（25 个 `.cpp`）→ 编 105 个 Swift 文件 → 替换 `Contents/MacOS/SpektraLab` → 删掉旧签名 → ad-hoc 重签。

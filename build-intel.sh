@@ -1,8 +1,9 @@
 #!/bin/bash
 # build-intel.sh -- build SpektraLab for Intel (x86_64) macOS with Command Line Tools only.
 #
-#   ./build-intel.sh --app "/tmp/SpektraLab-x86.app" --out ./build
+#   ./build-intel.sh --src ./SpektraLab --app "/tmp/SpektraLab-x86.app" --out ./build
 #
+# --src  the patched SpektraLab checkout (default: current directory)
 # --app  the .app copied out of the official arm64 DMG. It is used as the
 #        bundle skeleton (Assets.car, default.metallib, film/paper configs,
 #        DI LUTs, icns), so actool and metal -- which ship only with Xcode --
@@ -11,16 +12,19 @@ set -euo pipefail
 
 APP=""
 OUT="./build"
+SRC=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --app) APP="$2"; shift 2 ;;
     --out) OUT="$2"; shift 2 ;;
-    *) echo "usage: $0 --app <SpektraLab.app> [--out DIR]" >&2; exit 2 ;;
+    --src) SRC="$2"; shift 2 ;;
+    *) echo "usage: $0 --src <SpektraLab checkout> --app <SpektraLab.app> [--out DIR]" >&2; exit 2 ;;
   esac
 done
 [ -d "$APP" ] || { echo "error: --app must point at the .app from the official DMG" >&2; exit 2; }
 
-ROOT=$(cd "$(dirname "$0")" && pwd)
+ROOT=$(cd "${SRC:-$(pwd)}" && pwd)
+[ -d "$ROOT/engine" ] && [ -d "$ROOT/modern_UI" ] || { echo "error: --src must point at a SpektraLab checkout" >&2; exit 2; }
 UI="$ROOT/modern_UI/Spektrafilm"
 ENG="$ROOT/engine"
 OBJ="$ROOT/build-obj"
