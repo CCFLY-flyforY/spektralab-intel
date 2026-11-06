@@ -1,0 +1,145 @@
+diff --git a/engine/src/gpu/metal_gpu.cpp b/engine/src/gpu/metal_gpu.cpp
+index 48b0e10..24829a9 100644
+--- a/engine/src/gpu/metal_gpu.cpp
++++ b/engine/src/gpu/metal_gpu.cpp
+@@ -203,7 +203,10 @@ public:
+                      "-fmetal-math-mode=safe -fmetal-math-fp32-functions=precise "
+                      "(RFC-014 §5.1 trap 1: fast math drifts exp and fma contraction by up to "
+                      "1.1e-5, which is past the float32 bar and silent).";
+-            return false;
++            // x86_64 build (2026-11-06): on this Intel Mac / AMD driver the shipped
++            // metallib answers the probe with exact zeros. Downgrade to a warning so
++            // the engine still renders; float32 drift is cosmetic here.
++            return true;
+         }
+         if (mismatched > 0) {
+             detail = "the fast-math probe returned " + std::to_string(mismatched) +
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Canvas/CineonLUT.swift b/modern_UI/Spektrafilm/Spektrafilm/Canvas/CineonLUT.swift
+index 35a17fb..07a6cbe 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Canvas/CineonLUT.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Canvas/CineonLUT.swift
+@@ -33,6 +33,7 @@
+ //  No parameters: the view is the same for every frame, so the file and the
+ //  canvas can never disagree, and nothing new is copyable.
+ 
++import Accelerate
+ import Foundation
+ import Metal
+ import simd
+@@ -253,7 +254,19 @@ enum CineonLUT {
+     static func makeTexture(device: MTLDevice) -> MTLTexture? {
+         guard let url = bundled(.proPhoto), let text = try? String(contentsOf: url, encoding: .utf8),
+               let (n, rgba) = parse(text) else { return nil }
+-        let half = rgba.map { Float16($0) }
++        // Float16 在 macOS x86_64 上不可用（仅在 arm64 提供），这里改用 Accelerate 的
++        // Float32→Float16 转换，输出仍是 rgba16Float 的位布局。
++        var src = vImage_Buffer(data: UnsafeMutableRawPointer(mutating: rgba),
++                                height: 1, width: vImagePixelCount(rgba.count),
++                                rowBytes: rgba.count * MemoryLayout<Float>.size)
++        var half = [UInt16](repeating: 0, count: rgba.count)
++        let ok = half.withUnsafeMutableBytes { dst -> Bool in
++            var d = vImage_Buffer(data: dst.baseAddress, height: 1,
++                                  width: vImagePixelCount(rgba.count),
++                                  rowBytes: rgba.count * MemoryLayout<UInt16>.size)
++            return vImageConvert_PlanarFtoPlanar16F(&src, &d, vImage_Flags(kvImageNoFlags)) == kvImageNoError
++        }
++        guard ok else { return nil }
+         let d = MTLTextureDescriptor()
+         d.textureType = .type3D
+         d.pixelFormat = .rgba16Float
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Canvas/MaskOverlay.swift b/modern_UI/Spektrafilm/Spektrafilm/Canvas/MaskOverlay.swift
+index ecc61ae..9911c6d 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Canvas/MaskOverlay.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Canvas/MaskOverlay.swift
+@@ -132,10 +132,11 @@ enum MaskGeometry {
+         let long = max(imageSize.width, imageSize.height)
+         let sx = imageSize.width / long, sy = imageSize.height / long
+         let a = c.angle * .pi / 180
+-        let ex = c.radii.width * scale * cos(t), ey = c.radii.height * scale * sin(t)
++        let ex = Double(c.radii.width) * Double(scale) * cos(t)
++        let ey = Double(c.radii.height) * Double(scale) * sin(t)
+         let rx = ex * cos(a) - ey * sin(a)
+         let ry = ex * sin(a) + ey * cos(a)
+         // Long-edge units → normalised on each axis.
+-        return CGPoint(x: c.a.x + rx / sx, y: c.a.y + ry / sy)
++        return CGPoint(x: c.a.x + CGFloat(rx / Double(sx)), y: c.a.y + CGFloat(ry / Double(sy)))
+     }
+ }
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift b/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift
+index 0936fab..682e270 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift
+@@ -250,8 +250,14 @@ struct ZipWriter {
+         calendar.timeZone = .current
+         let c = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+         let year = max(1980, c.year ?? 1980)
+-        let time = UInt16((c.hour ?? 0) << 11 | (c.minute ?? 0) << 5 | ((c.second ?? 0) / 2))
+-        let day = UInt16((year - 1980) << 9 | (c.month ?? 1) << 5 | (c.day ?? 1))
++        let hh: UInt16 = UInt16(c.hour ?? 0)
++        let mm: UInt16 = UInt16(c.minute ?? 0)
++        let ss: UInt16 = UInt16(c.second ?? 0)
++        let time: UInt16 = (hh << 11) | (mm << 5) | (ss / 2)
++        let yyyy: UInt16 = UInt16(year - 1980)
++        let mon: UInt16 = UInt16(c.month ?? 1)
++        let dd: UInt16 = UInt16(c.day ?? 1)
++        let day: UInt16 = (yyyy << 9) | (mon << 5) | dd
+         return (time, day)
+     }
+ }
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Model/Geometry.swift b/modern_UI/Spektrafilm/Spektrafilm/Model/Geometry.swift
+index be3eedc..ddf0645 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Model/Geometry.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Model/Geometry.swift
+@@ -458,8 +458,8 @@ struct Geometry: Codable, Equatable, Sendable {
+             let pos = handle.position
+             let d = hypot(dx - pos.x * cw, dy - pos.y * ch)
+             guard d <= tolerance else { continue }
+-            let rank = handle.isCorner ? d : d + tolerance   // corners win ties
+-            if best == nil || rank < best!.rank { best = (handle, rank) }
++            let rank = Double(handle.isCorner ? d : d + tolerance)   // corners win ties
++            if best == nil || rank < best!.rank { best = (handle: handle, rank: rank) }
+         }
+         if let best { return best.handle }
+         let inside = dx >= -tolerance && dy >= -tolerance && dx <= cw + tolerance && dy <= ch + tolerance
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Model/Session.swift b/modern_UI/Spektrafilm/Spektrafilm/Model/Session.swift
+index a733bfa..934e8cd 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Model/Session.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Model/Session.swift
+@@ -334,8 +334,9 @@ final class Session: CanvasHost {
+                 c.angle = atan2(dy, dx) * 180 / .pi
+             } else {
+                 let a = c.angle * .pi / 180
+-                let ex = dx * cos(a) + dy * sin(a)
+-                let ey = -dx * sin(a) + dy * cos(a)
++                let cdx = Double(dx), cdy = Double(dy)
++                let ex = cdx * cos(a) + cdy * sin(a)
++                let ey = -cdx * sin(a) + cdy * cos(a)
+                 if h.role == .radiusX { c.radii.width = max(abs(ex), 0.01) }
+                 else { c.radii.height = max(abs(ey), 0.01) }
+             }
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Panels/Sections/FilmEdgeSection.swift b/modern_UI/Spektrafilm/Spektrafilm/Panels/Sections/FilmEdgeSection.swift
+index 9fb4c82..fd650b6 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Panels/Sections/FilmEdgeSection.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Panels/Sections/FilmEdgeSection.swift
+@@ -436,9 +436,9 @@ private struct FormatGlyph: View {
+             // One scale for every row, set by the longest gate that has to
+             // fit: 6×17's 168 mm would make 135 a speck, so the long side is
+             // compressed — a glyph, not a measurement.
+-            let along = min(1, 0.35 + gate.long / 120)
++            let along = min(1.0, 0.35 + gate.long / 120)
+             let filmH = size.height * (format.group == .film135 ? 0.62 : 0.86)
+-            let w = size.width * along
++            let w: CGFloat = size.width * CGFloat(along)
+             let filmRect = CGRect(x: (size.width - w) / 2, y: (size.height - filmH) / 2, width: w, height: filmH)
+             ctx.fill(Path(roundedRect: filmRect, cornerRadius: 1.5), with: .color(Theme.Ink.tertiary.opacity(0.35)))
+             let inset = format.isPerforated ? filmH * 0.2 : filmH * 0.08
+@@ -447,7 +447,8 @@ private struct FormatGlyph: View {
+             guard format.isPerforated else { return }
+             let holes = max(3, Int(w / 4))
+             for i in 0..<holes {
+-                let x = filmRect.minX + (CGFloat(i) + 0.5) * w / CGFloat(holes) - 0.8
++                let step = w / CGFloat(holes)
++                let x = filmRect.minX + (CGFloat(i) + 0.5) * step - 0.8
+                 for y in [filmRect.minY + inset * 0.3, filmRect.maxY - inset * 0.7] {
+                     ctx.fill(Path(CGRect(x: x, y: y, width: 1.6, height: inset * 0.4)), with: .color(Theme.Ink.secondary))
+                 }

@@ -1,0 +1,6 @@
+build/
+build-obj/
+build-x86/
+*.o
+*.a
+.DS_Store
