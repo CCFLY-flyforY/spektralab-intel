@@ -65,6 +65,70 @@ index ecc61ae..9911c6d 100644
 +        return CGPoint(x: c.a.x + CGFloat(rx / Double(sx)), y: c.a.y + CGFloat(ry / Double(sy)))
      }
  }
+diff --git a/modern_UI/Spektrafilm/Spektrafilm/Canvas/Renderer.swift b/modern_UI/Spektrafilm/Spektrafilm/Canvas/Renderer.swift
+index 658a353..b74ae3a 100644
+--- a/modern_UI/Spektrafilm/Spektrafilm/Canvas/Renderer.swift
++++ b/modern_UI/Spektrafilm/Spektrafilm/Canvas/Renderer.swift
+@@ -1093,6 +1093,35 @@ final class Renderer: NSObject {
+ }
+ 
+ extension MTLTexture {
++
++    /// A CPU-readable copy of this texture. `.shared` storage is not legal for
++    /// textures on Intel / discrete GPUs (`MTLStorageModeShared not allowed for
++    /// textures`), so `getBytes` straight off a render texture returns zeros and
++    /// every export comes out black. The bytes come from a `.managed` staging
++    /// texture that a blit has finished writing.
++    private func cpuReadableCopy() -> MTLTexture? {
++        guard let device = MTLCreateSystemDefaultDevice(),
++              let queue = device.makeCommandQueue() else { return nil }
++        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: pixelFormat,
++                                                        width: width, height: height,
++                                                        mipmapped: false)
++        d.usage = [.shaderRead]
++        d.storageMode = .managed
++        guard let staging = device.makeTexture(descriptor: d),
++              let cb = queue.makeCommandBuffer(),
++              let blit = cb.makeBlitCommandEncoder() else { return nil }
++        blit.copy(from: self, sourceSlice: 0, sourceLevel: 0,
++                  sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
++                  sourceSize: MTLSize(width: width, height: height, depth: 1),
++                  to: staging, destinationSlice: 0, destinationLevel: 0,
++                  destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0))
++        blit.synchronize(resource: staging)
++        blit.endEncoding()
++        cb.commit()
++        cb.waitUntilCompleted()
++        return staging
++    }
++
+     /// Read an rgba16Unorm texture back as a CGImage — **no conversion**. The
+     /// bytes are what they are; the tag says which space that is.
+     ///
+@@ -1106,9 +1135,10 @@ extension MTLTexture {
+     func makeCGImage(space: CGColorSpace = ImageDecoder.workingSpace ?? ImageDecoder.displayP3) -> CGImage? {
+         guard pixelFormat == .rgba16Unorm else { return nil }
+         let bpr = width * 8
++        guard let readable = cpuReadableCopy() else { return nil }
+         var data = Data(count: bpr * height)
+         data.withUnsafeMutableBytes { raw in
+-            getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
++            readable.getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+         }
+         guard let provider = CGDataProvider(data: data as CFData) else { return nil }
+         return CGImage(width: width, height: height, bitsPerComponent: 16, bitsPerPixel: 64, bytesPerRow: bpr,
+@@ -1120,9 +1150,10 @@ extension MTLTexture {
+     /// Raw 16-bit RGBA bytes, top row first.
+     func rgba16Bytes() -> Data {
+         let bpr = width * 8
++        guard let readable = cpuReadableCopy() else { return Data() }
+         var data = Data(count: bpr * height)
+         data.withUnsafeMutableBytes { raw in
+-            getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
++            readable.getBytes(raw.baseAddress!, bytesPerRow: bpr, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+         }
+         return data
+     }
 diff --git a/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift b/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift
 index 0936fab..682e270 100644
 --- a/modern_UI/Spektrafilm/Spektrafilm/Diagnostics/DiagnosticBundle.swift

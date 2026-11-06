@@ -21,8 +21,7 @@ SpektraLab 的官方发行版只提供 **arm64** 的 DMG（`SpektraLab-1.3.5-arm
 
 不想自己编的，可以下我构建好的版本：
 
-- **FilmLab-1.0.0-x86_64.zip**（约 30MB）— 见本仓库 Releases
-- SHA-256：`695df366e53f0d20217517468d78811cc0a8bc2b0448b3df51cd5d6a75cd632f`
+- **FilmLab-1.0.1-x86_64.zip**（约 30MB，含导出修复）— 见本仓库 Releases
 
 它是 ad-hoc 签名（没有开发者账号、未公证），首次打开会被 Gatekeeper 拦一次：右键 → 打开，或 `xattr -dr com.apple.quarantine /Applications/FilmLab.app`。
 
@@ -50,7 +49,7 @@ bash /path/to/spektralab-intel/build-intel.sh \
 
 ## 已知问题（Intel 版）
 
-- **命令行渲染产出全黑**：`spektralab cli preview` / `cli export` 生成的是全黑图（JPEG 与 16-bit TIFF 都是），而同一个文件在窗口里显影正常。批量/脚本通路目前不可用，只能在界面里用 ⌘E 导出。
+- ~~命令行渲染产出全黑~~：**v1.0.1 已修**。根因是 `.shared` 纹理存储模式在 Intel / 独立显卡上非法（`MTLStorageModeShared not allowed for textures`），画面显示正常但 CPU 读回为 0。现在读回先 blit 到 `.managed` 暂存纹理并同步，`cli preview` / `cli export` 均正常。
 - 首次配一张 80MP 的图在这类机器上要几十秒（`-Onone` 编的 Swift 更慢；引擎本来就是 `-O2`）。改 `-O` 会明显快一些。
 - 因为放宽了数学探针，float32 一致性自检被跳过，成片与 Apple 芯片上的结果可能有极微小数值差。
 

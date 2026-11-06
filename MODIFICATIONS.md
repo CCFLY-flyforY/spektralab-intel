@@ -32,3 +32,9 @@
 ## modern_UI/Spektrafilm/Spektrafilm/Model/Geometry.swift
 `CropHandle` 命中测试里把 `(handle, rank)` 赋给 `(handle: CropHandle, rank: Double)`，`rank` 是 `CGFloat`，隐式转换后仍不匹配。
 改动：`let rank = Double(...)`，赋值处写全标签 `(handle: handle, rank: rank)`。
+
+## modern_UI/Spektrafilm/Spektrafilm/Canvas/Renderer.swift
+`makeCGImage()` 与 `rgba16Bytes()` 直接对渲染纹理 `getBytes()`；而 `TextureStore` 与引擎侧的纹理大量使用 `.shared` 存储模式。
+`.shared` 纹理只在统一内存（Apple 芯片）上合法，Intel / 独立显卡上非法（`MTLStorageModeShared not allowed for textures`）：
+画面显示正常（GPU 写、GPU 画），但 CPU 读回永远是 0 —— 导出与 `cli preview` 全黑。
+改动：新增私有 `cpuReadableCopy()` —— 用 blit 把纹理复制到一块 `.managed` 暂存纹理、`synchronize(resource:)`、`waitUntilCompleted`，再从副本 `getBytes`；两处读回都改走它。
